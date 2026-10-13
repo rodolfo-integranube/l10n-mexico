@@ -524,29 +524,29 @@ class AccountMove(models.Model):
 
         The CFDI is issued in the document currency. For foreign currencies,
         TipoCambio is the MXN amount per unit of that currency (Anexo 20, up
-        to 6 decimals), taken from the document's own rate so that the CFDI
-        and the journal entry use the same exchange rate.
+        to 6 decimals). For MXN companies it is taken from the document's own
+        rate, so that the CFDI and the journal entry use the same exchange
+        rate; otherwise from the rate table to MXN at the invoice date.
         """
         self.ensure_one()
         currency = self.currency_id or self.company_currency_id
-        company_currency = self.company_currency_id
-        if currency == company_currency:
+        mxn = self.env.ref("base.MXN")
+        if currency == mxn:
             return currency.name, None
-        if self.invoice_currency_rate:
+        if self.company_currency_id == mxn and self.invoice_currency_rate:
             rate = 1 / self.invoice_currency_rate
         else:
             rate = currency._get_conversion_rate(
                 currency,
-                company_currency,
+                mxn,
                 self.company_id,
                 self.invoice_date or fields.Date.context_today(self),
             )
         if not rate or rate <= 0:
             raise UserError(
                 self.env._(
-                    "Missing exchange rate from %(currency)s to %(company)s.",
+                    "Missing exchange rate from %(currency)s to MXN.",
                     currency=currency.name,
-                    company=company_currency.name,
                 )
             )
         tipo_cambio = Decimal(str(rate)).quantize(
