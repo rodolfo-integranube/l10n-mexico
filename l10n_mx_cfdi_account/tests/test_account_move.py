@@ -128,6 +128,25 @@ class TestAccountMove(CFDIAccountTestCommon):
             refund._l10n_mx_cfdi_currency_data(), ("EUR", Decimal("20.000000"))
         )
 
+    def test_invoice_cfdi_currency_rate_fallback_and_missing_rate(self):
+        """Without the document rate, use the rate table; no rate is an error."""
+        eur = self.setup_other_currency("EUR", rates=[("1900-01-01", 0.05)])
+        invoice = self._create_cfdi_invoice(currency_id=eur.id)
+        with patch.object(
+            type(invoice),
+            "invoice_currency_rate",
+            new_callable=PropertyMock,
+            return_value=0.0,
+        ):
+            with patch.object(type(eur), "_get_conversion_rate", return_value=18.5):
+                self.assertEqual(
+                    invoice._l10n_mx_cfdi_currency_data(),
+                    ("EUR", Decimal("18.500000")),
+                )
+            with patch.object(type(eur), "_get_conversion_rate", return_value=0.0):
+                with self.assertRaises(UserError):
+                    invoice._l10n_mx_cfdi_currency_data()
+
     def test_prepare_invoice_cfdi_total_taxes_aggregates_same_code(self):
         self.cfdi_product.taxes_id = [(6, 0, [self._iva_tax().id])]
         invoice = self._post_cfdi_invoice(self._create_cfdi_invoice())
