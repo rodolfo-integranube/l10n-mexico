@@ -1,5 +1,6 @@
 import base64
 from datetime import timedelta
+from decimal import Decimal
 from unittest.mock import PropertyMock, patch
 
 from lxml import etree
@@ -108,6 +109,24 @@ class TestAccountMove(CFDIAccountTestCommon):
         self.assertIsNone(complemento)
         cfdi = invoice._gather_invoice_cfdi_data()
         self.assertEqual(cfdi.get("Exportacion"), "01")
+
+    def test_invoice_cfdi_company_currency_has_no_tipo_cambio(self):
+        invoice = self._create_cfdi_invoice()
+        cfdi = invoice._gather_invoice_cfdi_data()
+        self.assertEqual(cfdi.get("Moneda"), invoice.company_currency_id.name)
+        self.assertIsNone(cfdi.get("TipoCambio"))
+
+    def test_invoice_cfdi_foreign_currency_moneda_and_tipo_cambio(self):
+        """A foreign currency invoice is stamped in its own currency."""
+        eur = self.setup_other_currency("EUR", rates=[("1900-01-01", 0.05)])
+        invoice = self._create_cfdi_invoice(currency_id=eur.id)
+        cfdi = invoice._gather_invoice_cfdi_data()
+        self.assertEqual(cfdi.get("Moneda"), "EUR")
+        self.assertEqual(cfdi.get("TipoCambio"), Decimal("20.000000"))
+        refund = self._create_cfdi_invoice(move_type="out_refund", currency_id=eur.id)
+        self.assertEqual(
+            refund._l10n_mx_cfdi_currency_data(), ("EUR", Decimal("20.000000"))
+        )
 
     def test_prepare_invoice_cfdi_total_taxes_aggregates_same_code(self):
         self.cfdi_product.taxes_id = [(6, 0, [self._iva_tax().id])]
