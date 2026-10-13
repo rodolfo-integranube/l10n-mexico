@@ -1,7 +1,8 @@
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from satcfdi.create.cfd import pago20
+from satcfdi.create.compute import make_pago_totales
 
 from odoo import api, fields, models
 from odoo.exceptions import ValidationError
@@ -264,6 +265,15 @@ class AccountPayment(models.Model):
         )
         pagos = pago20.Pagos(pago=[pago])
         self._cfdi_align_pago_monto(pagos)
+        # satcfdi computes Totales in Pagos() (before the alignment above) and
+        # multiplies by TipoCambioP without rounding: recompute them in MXN
+        # with 2 decimals.
+        pagos["Totales"] = {
+            key: value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if isinstance(value, Decimal)
+            else value
+            for key, value in make_pago_totales(pagos["Pago"]).items()
+        }
         return pagos
 
     @api.model
@@ -276,7 +286,7 @@ class AccountPayment(models.Model):
         by the currency).
         """
         return Decimal(str(amount)).quantize(
-            Decimal(1).scaleb(-currency.decimal_places)
+            Decimal(1).scaleb(-currency.decimal_places), rounding=ROUND_HALF_UP
         )
 
     def _cfdi_docto_imp_amounts(self, invoice):

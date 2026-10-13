@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from unittest.mock import PropertyMock, patch
 
@@ -337,6 +337,44 @@ class TestAccountPayment(CFDIAccountTestCommon):
         for key, values in found.items():
             for value in values:
                 self.assertEqual(value.as_tuple().exponent, -2, f"{key}={value}")
+
+    def test_prepare_payment_cfdi_totales_rounded_to_mxn_decimals(self):
+        """Totales are in MXN with 2 decimals, also with a TipoCambioP."""
+        invoice = self._post_cfdi_invoice(
+            self._create_cfdi_invoice(
+                payment_method_id=self.env.ref("l10n_mx_catalogs.c_metodo_pago_PPD").id
+            )
+        )
+        self._create_published_invoice_cfdi(invoice)
+        payment = self._register_invoice_payment(invoice)
+        taxes = [
+            {
+                "Name": "IVA",
+                "Rate": 0.16,
+                "IsRetention": False,
+                "Base": 100.0,
+                "Total": 16.0,
+            }
+        ]
+        with (
+            patch.object(type(payment), "_compute_taxes", return_value=taxes),
+            patch.object(
+                type(payment),
+                "_cfdi_tipo_cambio_p",
+                return_value=Decimal("18.123456"),
+            ),
+        ):
+            pagos = payment.prepare_payment_cfdi()
+        totales = pagos["Totales"]
+        self.assertIn("MontoTotalPagos", totales)
+        self.assertIn("TotalTrasladosBaseIVA16", totales)
+        for key, value in totales.items():
+            self.assertEqual(value.as_tuple().exponent, -2, f"{key}={value}")
+        monto = pagos["Pago"][0]["Monto"] * Decimal("18.123456")
+        self.assertEqual(
+            totales["MontoTotalPagos"],
+            monto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        )
 
     def test_prepare_payment_cfdi_foreign_currency(self):
         invoice = self._post_cfdi_invoice(
