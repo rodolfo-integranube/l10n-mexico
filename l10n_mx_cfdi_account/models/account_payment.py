@@ -199,11 +199,13 @@ class AccountPayment(models.Model):
                 retenciones = []
                 for tax in tax_data:
                     payload = {
-                        "base_dr": Decimal(str(tax["Base"])),
+                        "base_dr": self._cfdi_amount(tax["Base"], invoice.currency_id),
                         "impuesto_dr": cfdi_builder.tax_code_from_name(tax["Name"]),
                         "tipo_factor_dr": "Tasa",
                         "tasa_o_cuota_dr": cfdi_builder._dec_tasa(tax["Rate"]),
-                        "importe_dr": Decimal(str(tax["Total"])),
+                        "importe_dr": self._cfdi_amount(
+                            tax["Total"], invoice.currency_id
+                        ),
                     }
                     if tax["IsRetention"]:
                         retenciones.append(pago20.RetencionDR(**payload))
@@ -222,8 +224,8 @@ class AccountPayment(models.Model):
                 id_documento=existent_invoice_cfdi.uuid,
                 moneda_dr=invoice.currency_id.name,
                 num_parcialidad=len(existent_payments_cfdi) + 1,
-                imp_saldo_ant=Decimal(str(previous_balance)),
-                imp_pagado=Decimal(str(amount_paid)),
+                imp_saldo_ant=self._cfdi_amount(previous_balance, invoice.currency_id),
+                imp_pagado=self._cfdi_amount(amount_paid, invoice.currency_id),
                 objeto_imp_dr=objeto_imp,
                 serie=existent_invoice_cfdi.serie or None,
                 folio=existent_invoice_cfdi.folio or None,
@@ -254,7 +256,7 @@ class AccountPayment(models.Model):
             fecha_pago=payment_date,
             forma_de_pago_p=forma_pago,
             moneda_p=self.currency_id.name,
-            monto=Decimal(str(json_float_round(self.amount, 2))),
+            monto=self._cfdi_amount(self.amount, self.currency_id),
             # satcfdi make_pago_totales does monto * TipoCambioP; None is stored
             # when omitted incorrectly, so always pass 1 for MXN.
             tipo_cambio_p=self._cfdi_tipo_cambio_p(),
@@ -263,6 +265,19 @@ class AccountPayment(models.Model):
         pagos = pago20.Pagos(pago=[pago])
         self._cfdi_align_pago_monto(pagos)
         return pagos
+
+    @api.model
+    def _cfdi_amount(self, amount, currency):
+        """Return ``amount`` as a Decimal with the decimals of ``currency``.
+
+        ``Decimal(str(500.0))`` keeps a single decimal ("500.0") and satcfdi
+        carries that exponent into BaseP/ImporteP and Totales; PACs such as
+        Finkok reject it (CRPER654: amounts must have the decimals supported
+        by the currency).
+        """
+        return Decimal(str(amount)).quantize(
+            Decimal(1).scaleb(-currency.decimal_places)
+        )
 
     def _cfdi_docto_imp_amounts(self, invoice):
         """Return ``(ImpSaldoAnt, ImpPagado)`` in invoice (MonedaDR) currency.
@@ -299,7 +314,7 @@ class AccountPayment(models.Model):
         if not pago_nodes:
             return
         pago = pago_nodes[0]
-        payment_amount = Decimal(str(json_float_round(self.amount, 2)))
+        payment_amount = self._cfdi_amount(self.amount, self.currency_id)
         doctos = list(pago.get("DoctoRelacionado") or [])
         if not doctos:
             return
